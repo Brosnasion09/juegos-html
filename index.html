@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Juego de Cocina en Equipo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: 'Amatic SC', cursive;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            background-color: #8B4513;
+        }
+        .loading-screen, .menu-screen, .game-container, .win-screen, .waiting-screen, .join-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .loading-screen {
+            display: flex;
+            background: url('images/checkerboard.png') repeat;
+            background-color: #f8f1e9;
+        }
+        .menu-screen, .waiting-screen, .join-screen {
+            display: none;
+            background-image: url('images/menu-background.png');
+            background-size: cover;
+            background-position: center;
+        }
+        .win-screen {
+            display: none;
+            background-image: url('images/menu-background.png');
+            background-size: cover;
+            background-position: center;
+        }
+        .menu-content, .win-content, .waiting-content, .join-content {
+            background: url('images/wood-texture.png') repeat;
+            background-color: rgba(139, 69, 19, 0.9);
+            padding: 30px;
+            border-radius: 15px;
+            border: 5px solid #FFD700;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+        .game-container {
+            display: none;
+            background-color: transparent;
+        }
+        .interface {
+            background: url('images/parchment.png') repeat;
+            background-color: rgba(245, 245, 220, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            border: 3px solid #8B4513;
+            margin-bottom: 10px;
+            max-width: 600px;
+        }
+        canvas {
+            border: 5px solid #8B4513;
+            border-radius: 10px;
+            background-color: #fff;
+            max-width: 100%;
+            max-height: 100%;
+        }
+        .instructions {
+            font-size: 24px;
+            color: #A52A2A;
+            text-shadow: 1px 1px 2px #FFD700;
+        }
+        .instructions p {
+            margin: 5px 0;
+        }
+        .error {
+            color: #FF0000;
+            font-size: 28px;
+            display: none;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 36px;
+            font-family: 'Amatic SC', cursive;
+            cursor: pointer;
+            background-color: #FF4500;
+            color: #FFF;
+            border: 3px solid #FFD700;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+            transition: transform 0.2s;
+        }
+        button:hover {
+            background-color: #FF6347;
+            transform: scale(1.1);
+        }
+        input[type="text"] {
+            padding: 10px;
+            font-size: 24px;
+            font-family: 'Amatic SC', cursive;
+            margin: 10px;
+            border: 3px solid #FFD700;
+            border-radius: 5px;
+            width: 200px;
+        }
+        .progress-bar {
+            width: 300px;
+            height: 30px;
+            border: 3px solid #8B4513;
+            border-radius: 5px;
+            margin-top: 20px;
+            background-color: #FFF;
+        }
+        .progress-fill {
+            height: 100%;
+            background-color: #FF4500;
+            width: 0%;
+            transition: width 0.3s;
+            border-radius: 2px;
+        }
+        #roomCode {
+            font-size: 48px;
+            color: #FFD700;
+            text-shadow: 2px 2px #A52A2A;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading-screen" id="loadingScreen">
+        <h1 style="font-size: 48px; color: #A52A2A; text-shadow: 2px 2px #FFD700;">Cargando...</h1>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+    </div>
+    <div class="menu-screen" id="menuScreen">
+        <div class="menu-content">
+            <h1 style="font-size: 64px; color: #FFF; text-shadow: 2px 2px #A52A2A;">Juego de Cocina en Equipo</h1>
+            <button onclick="startGame()">Jugar Offline</button>
+            <button onclick="showCreateGame()">Crear Partida Online</button>
+            <button onclick="showJoinGame()">Unirse a Partida</button>
+        </div>
+    </div>
+    <div class="waiting-screen" id="waitingScreen">
+        <div class="waiting-content">
+            <h1 style="font-size: 48px; color: #FFF; text-shadow: 2px 2px #A52A2A;">Esperando a que un amigo se una...</h1>
+            <p style="font-size: 36px; color: #FFF;">Código de la partida:</p>
+            <div id="roomCode">------</div>
+            <button onclick="cancelWaiting()">Cancelar</button>
+        </div>
+    </div>
+    <div class="join-screen" id="joinScreen">
+        <div class="join-content">
+            <h1 style="font-size: 48px; color: #FFF; text-shadow: 2px 2px #A52A2A;">Unirse a Partida</h1>
+            <input type="text" id="joinCodeInput" placeholder="Ingresa el código">
+            <button onclick="joinGame()">Unirse</button>
+            <button onclick="backToMenu()">Volver</button>
+        </div>
+    </div>
+    <div class="game-container" id="gameContainer">
+        <div class="interface">
+            <div id="errorMsg" class="error">Error: No se pudieron cargar las imágenes. Verifica la carpeta 'images/'.</div>
+            <div class="instructions">
+                <p>Jugador 1: Mover con WASD, ingredientes en bodega con Q (tomate), E (queso), R (pepperoni).</p>
+                <p>Jugador 2: Mover con flechas, ingredientes en bodega con I (tomate), O (queso), P (pepperoni).</p>
+                <p>Recoge los 3 ingredientes en el orden mostrado debajo de la mesa, cocina, y entrega. ¡Llega a 700 puntos para ganar!</p>
+                <p>Si la pizza sale mal, bótala en la basura (al lado de la cocina).</p>
+            </div>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+    <div class="win-screen" id="winScreen">
+        <div class="win-content">
+            <h1 id="winMessage" style="font-size: 64px; color: #FFF; text-shadow: 2px 2px #A52A2A;">¡Ganaste!</h1>
+            <button onclick="resetGame()">Volver a Jugar</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let teamScore = 0;
+        let level = 1;
+        let teamIngredients = [];
+        let ingredientOrder = [];
+        let isCooking = false;
+        let cookingStartTime = null;
+        let gameWon = false;
+        const COOKING_TIME = 10000;
+        const CUSTOMER_WAIT_TIME = 60000;
+        const WIN_SCORE = 700;
+        const BASE_WIDTH = 600;
+        const BASE_HEIGHT = 400;
+        let scale = 1;
+        let isOnline = false;
+        let playerId = null;
+        let socket = null;
+        const notifications = [];
+
+        function addNotification(message, x, y) {
+            notifications.push({
+                message,
+                x,
+                y,
+                startTime: Date.now(),
+                duration: 3000
+            });
+        }
+
+        function drawNotifications() {
+            const currentTime = Date.now();
+            notifications.forEach((notif, index) => {
+                if (currentTime - notif.startTime > notif.duration) {
+                    notifications.splice(index, 1);
+                    return;
+                }
+                ctx.fillStyle = 'rgba(255, 245, 220, 0.9)';
+                ctx.fillRect(notif.x - 10, notif.y - 25, ctx.measureText(notif.message).width + 20, 35);
+                ctx.fillStyle = '#A52A2A';
+                ctx.strokeStyle = '#FFD700';
+                ctx.lineWidth = 1;
+                ctx.font = '28px Amatic SC';
+                ctx.strokeText(notif.message, notif.x, notif.y);
+                ctx.fillText(notif.message, notif.x, notif.y);
+            });
+        }
+
+        function generateRandomOrder() {
+            const ingredients = ['queso', 'tomate', 'pepperoni'];
+            for (let i = ingredients.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [ingredients[i], ingredients[j]] = [ingredients[j], ingredients[i]];
+            }
+            return ingredients;
+        }
+
+        const images = {
+            player1: new Image(),
+            player2: new Image(),
+            pizza: new Image(),
+            customer: new Image(),
+            table: new Image(),
+            tomate: new Image(),
+            queso: new Image(),
+            pepperoni: new Image(),
+            background: new Image(),
+            bodega: new Image(),
+            cocina: new Image(),
+            basura: new Image(),
+            menuBackground: new Image()
+        };
+        images.player1.src = 'images/player1.png';
+        images.player2.src = 'images/player2.png';
+        images.pizza.src = 'images/pizza.png';
+        images.customer.src = 'images/customer.png';
+        images.table.src = 'images/table.png';
+        images.tomate.src = 'images/tomate.png';
+        images.queso.src = 'images/queso.png';
+        images.pepperoni.src = 'images/pepperoni.png';
+        images.background.src = 'images/background.png';
+        images.bodega.src = 'images/bodega.png';
+        images.cocina.src = 'images/cocina.png';
+        images.basura.src = 'images/basura.png';
+        images.menuBackground.src = 'images/menu-background.png';
+
+        let players = [
+            { x: 150, y: 150, speed: 4, carryingPizza: false, pizzaOrder: null, img: images.player1 },
+            { x: 200, y: 150, speed: 4, carryingPizza: false, pizzaOrder: null, img: images.player2 }
+        ];
+        const bodega = { x: 50, y: 50, width: 50, height: 50, img: images.bodega };
+        const cookingStation = { x: 500, y: 50, width: 50, height: 50, img: images.cocina };
+        const basura = { x: 560, y: 50, width: 50, height: 50, img: images.basura };
+        let tables = [
+            { x: 80, y: 280, width: 80, height: 80, hasCustomer: true, customerTimer: Date.now(), order: generateRandomOrder(), img: images.table, customerImg: images.customer },
+            { x: 280, y: 280, width: 80, height: 80, hasCustomer: true, customerTimer: Date.now(), order: generateRandomOrder(), img: images.table, customerImg: images.customer }
+        ];
+
+        const keys = {};
+        document.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            if (isOnline && socket && playerId !== null) {
+                socket.emit('keyPress', { playerId, key: e.key, pressed: true });
+            }
+            canvas.focus();
+        });
+        document.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+            if (isOnline && socket && playerId !== null) {
+                socket.emit('keyPress', { playerId, key: e.key, pressed: false });
+            }
+        });
+
+        function handleIngredientSelection() {
+            if (isOnline && playerId === null) return;
+            players.forEach((player, index) => {
+                if ((isOnline && index !== playerId) || !checkCollision(player.x, player.y, 50, 50, bodega.x, bodega.y, bodega.width, bodega.height)) {
+                    return;
+                }
+                if (index === 0) {
+                    if (keys['q'] && !teamIngredients.includes('tomate')) {
+                        teamIngredients.push('tomate');
+                        ingredientOrder.push('tomate');
+                        addNotification('J1: Tomate', player.x, player.y - 20);
+                        if (isOnline) socket.emit('ingredientPicked', { ingredient: 'tomate', order: ingredientOrder });
+                    }
+                    if (keys['e'] && !teamIngredients.includes('queso')) {
+                        teamIngredients.push('queso');
+                        ingredientOrder.push('queso');
+                        addNotification('J1: Queso', player.x, player.y - 20);
+                        if (isOnline) socket.emit('ingredientPicked', { ingredient: 'queso', order: ingredientOrder });
+                    }
+                    if (keys['r'] && !teamIngredients.includes('pepperoni')) {
+                        teamIngredients.push('pepperoni');
+                        ingredientOrder.push('pepperoni');
+                        addNotification('J1: Pepperoni', player.x, player.y - 20);
+                        if (isOnline) socket.emit('ingredientPicked', { ingredient: 'pepperoni', order: ingredientOrder });
+                    }
+                }
+                if (index === 1) {
+                    if (keys['i'] && !teamIngredients.includes('tomate')) {
+                        teamIngredients.push('tomate');
+                        ingredientOrder.push('tomate');
+                        addNotification('J2: Tomate', player.x, player.y - 20);
+                        if (isOnline) socket.emit('ingredientPicked', { ingredient: 'tomate', order: ingredientOrder });
+                    }
+                    if (keys['o'] && !teamIngredients.includes('queso')) {
+                        teamIngredients.push('queso');
+                        ingredientOrder.push('queso');
+                        addNotification('J2: Queso', player.x, player.y - 20);
+                        if (isOnline) socket.emit('ingredientPicked', { ingredient: 'queso', order: ingredientOrder });
+                    }
+                    if (keys['p'] && !teamIngredients.includes('pepperoni')) {
+                        teamIngredients.push('pepperoni');
+                        ingredientOrder.push('pepperoni');
+                        addNotification('J2: Pepperoni', player.x, player.y - 20);
+                        if (isOnline) socket.emit('ingredientPicked', { ingredient: 'pepperoni', order: ingredientOrder });
+                    }
+                }
+            });
+            if (!isCooking && teamIngredients.length === 3) {
+                isCooking = true;
+                cookingStartTime = Date.now();
+                addNotification('¡Cocinando! 10s', cookingStation.x, cookingStation.y - 30);
+                if (isOnline) socket.emit('startCooking', { startTime: cookingStartTime });
+            }
+        }
+
+        function completePizza(playerIndex) {
+            if (isCooking && teamIngredients.length === 3) {
+                isCooking = false;
+                cookingStartTime = null;
+                players[playerIndex].carryingPizza = true;
+                players[playerIndex].pizzaOrder = [...ingredientOrder];
+                teamIngredients = [];
+                ingredientOrder = [];
+                addNotification(`J${playerIndex + 1}: Pizza lista`, players[playerIndex].x, players[playerIndex].y - 20);
+                if (isOnline) socket.emit('pizzaCompleted', { playerIndex, pizzaOrder: players[playerIndex].pizzaOrder });
+            }
+        }
+
+        function discardPizza(playerIndex) {
+            if (players[playerIndex].carryingPizza) {
+                players[playerIndex].carryingPizza = false;
+                players[playerIndex].pizzaOrder = null;
+                addNotification(`J${playerIndex + 1}: Pizza descartada`, players[playerIndex].x, players[playerIndex].y - 20);
+                if (isOnline) socket.emit('pizzaDiscarded', { playerIndex });
+            }
+        }
+
+        function checkLevelUp() {
+            if (teamScore >= level * 100) {
+                level++;
+                const newX = 80 + ((tables.length - 2) * 150);
+                if (newX + 80 <= BASE_WIDTH) {
+                    tables.push({
+                        x: newX,
+                        y: 280,
+                        width: 80,
+                        height: 80,
+                        hasCustomer: true,
+                        customerTimer: Date.now(),
+                        order: generateRandomOrder(),
+                        img: images.table,
+                        customerImg: images.customer
+                    });
+                    addNotification(`¡Nivel ${level} alcanzado!`, BASE_WIDTH / 2 - 50, 20);
+                    if (isOnline) socket.emit('levelUp', { level, newTable: tables[tables.length - 1] });
+                } else {
+                    addNotification('¡Límite de mesas alcanzado!', BASE_WIDTH / 2 - 50, 20);
+                }
+            }
+        }
+
+        function checkWin() {
+            if (teamScore >= WIN_SCORE && !gameWon) {
+                gameWon = true;
+                document.getElementById('gameContainer').style.display = 'none';
+                document.getElementById('winScreen').style.display = 'flex';
+                document.getElementById('winMessage').textContent = `¡Ganaste! Puntuación final: ${teamScore}`;
+                if (isOnline) socket.emit('gameWon', { score: teamScore });
+            }
+        }
+
+        function checkCollision(x1, y1, w1, h1, x2, y2, w2, h2) {
+            return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+        }
+
+        function setupCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+            scale = dpr;
+            canvas.width = BASE_WIDTH * scale;
+            canvas.height = BASE_HEIGHT * scale;
+            canvas.style.width = `${BASE_WIDTH}px`;
+            canvas.style.height = `${BASE_HEIGHT}px`;
+            ctx.scale(scale, scale);
+            resizeCanvas();
+        }
+
+        function resizeCanvas() {
+            const aspectRatio = BASE_WIDTH / BASE_HEIGHT;
+            let newWidth = window.innerWidth;
+            let newHeight = window.innerHeight;
+            if (newWidth / newHeight > aspectRatio) {
+                newWidth = newHeight * aspectRatio;
+            } else {
+                newHeight = newWidth / aspectRatio;
+            }
+            canvas.style.width = `${newWidth}px`;
+            canvas.style.height = `${newHeight}px`;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.imageSmoothingEnabled = true;
+            if (images.background.complete && images.background.naturalWidth !== 0) {
+                ctx.drawImage(images.background, 0, 0, BASE_WIDTH, BASE_HEIGHT);
+            } else {
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+            }
+            ctx.imageSmoothingEnabled = false;
+
+            if (bodega.img.complete && bodega.img.naturalWidth !== 0) {
+                ctx.drawImage(bodega.img, bodega.x, bodega.y, bodega.width, bodega.height);
+            } else {
+                ctx.fillStyle = '#A9A9A9';
+                ctx.fillRect(bodega.x, bodega.y, bodega.width, bodega.height);
+            }
+            ctx.fillStyle = '#A52A2A';
+            ctx.strokeStyle = '#FFD700';
+            ctx.lineWidth = 1;
+            ctx.font = '28px Amatic SC';
+            ctx.strokeText('Bodega', bodega.x + 5, bodega.y - 10);
+            ctx.fillText('Bodega', bodega.x + 5, bodega.y - 10);
+
+            if (cookingStation.img.complete && cookingStation.img.naturalWidth !== 0) {
+                ctx.drawImage(cookingStation.img, cookingStation.x, cookingStation.y, cookingStation.width, cookingStation.height);
+            } else {
+                ctx.fillStyle = '#e0e0e0';
+                ctx.fillRect(cookingStation.x, cookingStation.y, cookingStation.width, cookingStation.height);
+            }
+            ctx.strokeText('Cocina', cookingStation.x + 5, cookingStation.y - 10);
+            ctx.fillText('Cocina', cookingStation.x + 5, cookingStation.y - 10);
+
+            if (basura.img.complete && basura.img.naturalWidth !== 0) {
+                ctx.drawImage(basura.img, basura.x, basura.y, basura.width, basura.height);
+            } else {
+                ctx.fillStyle = '#555555';
+                ctx.fillRect(basura.x, basura.y, basura.width, basura.height);
+            }
+            ctx.strokeText('Basura', basura.x + 5, basura.y - 10);
+            ctx.fillText('Basura', basura.x + 5, basura.y - 10);
+
+            let offsetX = cookingStation.x - 80;
+            teamIngredients.forEach(ing => {
+                const img = images[ing];
+                if (img && img.complete && img.naturalWidth !== 0) {
+                    ctx.drawImage(img, offsetX, cookingStation.y + 10, 30, 30);
+                } else {
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(offsetX, cookingStation.y + 10, 30, 30);
+                }
+                offsetX -= 35;
+            });
+
+            if (isCooking && cookingStartTime) {
+                const elapsed = Date.now() - cookingStartTime;
+                const remaining = Math.max(0, Math.ceil((COOKING_TIME - elapsed) / 1000));
+                ctx.fillStyle = remaining <= 3 ? '#FF0000' : '#A52A2A';
+                ctx.strokeStyle = '#FFD700';
+                ctx.font = '32px Amatic SC';
+                ctx.strokeText(`${remaining}s`, cookingStation.x, cookingStation.y - 20);
+                ctx.fillText(`${remaining}s`, cookingStation.x, cookingStation.y - 20);
+                if (elapsed >= COOKING_TIME && !isOnline) {
+                    isCooking = false;
+                    cookingStartTime = null;
+                    teamIngredients = [];
+                    ingredientOrder = [];
+                    teamScore -= 5;
+                    addNotification('¡Pizza quemada! -5', BASE_WIDTH / 2 - 50, 20);
+                }
+            }
+
+            tables.forEach((table, index) => {
+                if (table.hasCustomer) {
+                    if (table.customerImg.complete && table.customerImg.naturalWidth !== 0) {
+                        ctx.drawImage(table.customerImg, table.x + 15, table.y - 10, 50, 50);
+                    } else {
+                        ctx.fillStyle = '#FF0000';
+                        ctx.fillRect(table.x + 15, table.y - 10, 50, 50);
+                    }
+                    const elapsed = Date.now() - table.customerTimer;
+                    const remaining = Math.max(0, Math.ceil((CUSTOMER_WAIT_TIME - elapsed) / 1000));
+                    ctx.fillStyle = remaining <= 10 ? '#FF0000' : '#A52A2A';
+                    ctx.strokeStyle = '#FFD700';
+                    ctx.font = '28px Amatic SC';
+                    const timerY = index < 2 ? table.y - 50 : table.y + 120;
+                    ctx.strokeText(`${remaining}s`, table.x + 25, timerY);
+                    ctx.fillText(`${remaining}s`, table.x + 25, timerY);
+                    let orderX = table.x - 20;
+                    const orderY = index < 2 ? table.y + 80 : table.y - 80;
+                    table.order.forEach(ing => {
+                        const img = images[ing];
+                        if (img && img.complete && img.naturalWidth !== 0) {
+                            ctx.drawImage(img, orderX, orderY, 30, 30);
+                        } else {
+                            ctx.fillStyle = '#000';
+                            ctx.fillRect(orderX, orderY, 30, 30);
+                        }
+                        orderX += 35;
+                    });
+                }
+            });
+
+            tables.forEach(table => {
+                if (table.img.complete && table.img.naturalWidth !== 0) {
+                    ctx.drawImage(table.img, table.x, table.y, table.width, table.height);
+                } else {
+                    ctx.fillStyle = '#8B4513';
+                    ctx.fillRect(table.x, table.y, table.width, table.height);
+                }
+            });
+
+            players.forEach((player, index) => {
+                if (player.img.complete && player.img.naturalWidth !== 0) {
+                    ctx.drawImage(player.img, player.x, player.y, 50, 50);
+                } else {
+                    ctx.fillStyle = index === 0 ? '#0000FF' : '#00FF00';
+                    ctx.fillRect(player.x, player.y, 50, 50);
+                }
+                if (player.carryingPizza) {
+                    if (images.pizza.complete && images.pizza.naturalWidth !== 0) {
+                        ctx.drawImage(images.pizza, player.x + 10, player.y - 10, 30, 30);
+                    } else {
+                        ctx.fillStyle = '#FFA500';
+                        ctx.fillRect(player.x + 10, player.y - 10, 30, 30);
+                    }
+                }
+            });
+
+            ctx.fillStyle = '#A52A2A';
+            ctx.strokeStyle = '#FFD700';
+            ctx.font = '32px Amatic SC';
+            ctx.strokeText(`Puntos: ${teamScore}`, BASE_WIDTH / 2 - 50, 20);
+            ctx.fillText(`Puntos: ${teamScore}`, BASE_WIDTH / 2 - 50, 20);
+
+            drawNotifications();
+        }
+
+        function update() {
+            if (gameWon) return;
+            if (!isOnline || playerId !== null) {
+                if (!isOnline || playerId === 0) {
+                    if (keys['w'] && players[0].y > 0) players[0].y -= players[0].speed;
+                    if (keys['s'] && players[0].y < BASE_HEIGHT - 50) players[0].y += players[0].speed;
+                    if (keys['a'] && players[0].x > 0) players[0].x -= players[0].speed;
+                    if (keys['d'] && players[0].x < BASE_WIDTH - 50) players[0].x += players[0].speed;
+                }
+                if (!isOnline || playerId === 1) {
+                    if (keys['ArrowUp'] && players[1].y > 0) players[1].y -= players[1].speed;
+                    if (keys['ArrowDown'] && players[1].y < BASE_HEIGHT - 50) players[1].y += players[1].speed;
+                    if (keys['ArrowLeft'] && players[1].x > 0) players[1].x -= players[1].speed;
+                    if (keys['ArrowRight'] && players[1].x < BASE_WIDTH - 50) players[1].x += players[1].speed;
+                }
+                if (isOnline && socket && playerId !== null) {
+                    socket.emit('updatePosition', { playerId, x: players[playerId].x, y: players[playerId].y });
+                }
+                handleIngredientSelection();
+                players.forEach((player, index) => {
+                    if (isOnline && index !== playerId) return;
+                    if (checkCollision(player.x, player.y, 50, 50, cookingStation.x, cookingStation.y, cookingStation.width, cookingStation.height)) {
+                        if (isCooking) {
+                            completePizza(index);
+                        }
+                    }
+                });
+                players.forEach((player, index) => {
+                    if (isOnline && index !== playerId) return;
+                    if (checkCollision(player.x, player.y, 50, 50, basura.x, basura.y, basura.width, basura.height)) {
+                        discardPizza(index);
+                    }
+                });
+                players.forEach((player, index) => {
+                    if (isOnline && index !== playerId) return;
+                    tables.forEach(table => {
+                        if (table.hasCustomer && player.carryingPizza && checkCollision(player.x, player.y, 50, 50, table.x, table.y, table.width, table.height)) {
+                            let isCorrect = true;
+                            for (let i = 0; i < 3; i++) {
+                                if (player.pizzaOrder[i] !== table.order[i]) {
+                                    isCorrect = false;
+                                    break;
+                                }
+                            }
+                            player.carryingPizza = false;
+                            player.pizzaOrder = null;
+                            if (isCorrect) {
+                                table.hasCustomer = false;
+                                teamScore += 10;
+                                addNotification('¡Entregada! +10', table.x + 20, table.y + 120);
+                                checkLevelUp();
+                                checkWin();
+                                if (isOnline) {
+                                    socket.emit('pizzaDelivered', { tableIndex: tables.indexOf(table), score: teamScore, correct: isCorrect });
+                                    setTimeout(() => {
+                                        table.hasCustomer = true;
+                                        table.customerTimer = Date.now();
+                                        table.order = generateRandomOrder();
+                                        socket.emit('newCustomer', { tableIndex: tables.indexOf(table), customerTimer: table.customerTimer, order: table.order });
+                                    }, 2000);
+                                } else {
+                                    setTimeout(() => {
+                                        table.hasCustomer = true;
+                                        table.customerTimer = Date.now();
+                                        table.order = generateRandomOrder();
+                                    }, 2000);
+                                }
+                            } else {
+                                teamScore -= 5;
+                                addNotification('¡Pizza incorrecta! -5', table.x + 20, table.y + 120);
+                                checkWin();
+                                if (isOnline) socket.emit('pizzaDelivered', { tableIndex: tables.indexOf(table), score: teamScore, correct: isCorrect });
+                            }
+                        }
+                    });
+                });
+                if (!isOnline) {
+                    tables.forEach(table => {
+                        if (table.hasCustomer && Date.now() - table.customerTimer > CUSTOMER_WAIT_TIME) {
+                            table.hasCustomer = false;
+                            teamScore -= 5;
+                            addNotification('Cliente se fue! -5', table.x + 20, table.y + 120);
+                            checkWin();
+                            setTimeout(() => {
+                                table.hasCustomer = true;
+                                table.customerTimer = Date.now();
+                                table.order = generateRandomOrder();
+                            }, 2000);
+                        }
+                    });
+                }
+            }
+            draw();
+            requestAnimationFrame(update);
+        }
+
+        function resetGame() {
+            teamScore = 0;
+            level = 1;
+            teamIngredients = [];
+            ingredientOrder = [];
+            isCooking = false;
+            cookingStartTime = null;
+            gameWon = false;
+            players[0].x = 150;
+            players[0].y = 150;
+            players[0].carryingPizza = false;
+            players[0].pizzaOrder = null;
+            players[1].x = 200;
+            players[1].y = 150;
+            players[1].carryingPizza = false;
+            players[1].pizzaOrder = null;
+            tables = [
+                { x: 80, y: 280, width: 80, height: 80, hasCustomer: true, customerTimer: Date.now(), order: generateRandomOrder(), img: images.table, customerImg: images.customer },
+                { x: 280, y: 280, width: 80, height: 80, hasCustomer: true, customerTimer: Date.now(), order: generateRandomOrder(), img: images.table, customerImg: images.customer }
+            ];
+            document.getElementById('winScreen').style.display = 'none';
+            document.getElementById('gameContainer').style.display = 'flex';
+            if (isOnline) socket.emit('resetGame');
+            setupCanvas();
+            update();
+        }
+
+        let imagesLoaded = 0;
+        const totalImages = Object.keys(images).length;
+        const progressFill = document.getElementById('progressFill');
+
+        function checkImagesLoaded() {
+            imagesLoaded++;
+            const progress = (imagesLoaded / totalImages) * 100;
+            progressFill.style.width = `${progress}%`;
+            if (imagesLoaded === totalImages) {
+                document.getElementById('loadingScreen').style.display = 'none';
+                document.getElementById('menuScreen').style.display = 'flex';
+            }
+        }
+
+        Object.values(images).forEach(img => {
+            img.onload = checkImagesLoaded;
+            img.onerror = () => {
+                document.getElementById('errorMsg').style.display = 'block';
+                checkImagesLoaded();
+            };
+        });
+
+        function startGame() {
+            isOnline = false;
+            playerId = null;
+            document.getElementById('menuScreen').style.display = 'none';
+            document.getElementById('gameContainer').style.display = 'flex';
+            if (canvas.requestFullscreen) {
+                canvas.requestFullscreen();
+            }
+            setupCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            update();
+        }
+
+        function showCreateGame() {
+            document.getElementById('menuScreen').style.display = 'none';
+            document.getElementById('waitingScreen').style.display = 'flex';
+            startOnlineGame();
+        }
+
+        function showJoinGame() {
+            document.getElementById('menuScreen').style.display = 'none';
+            document.getElementById('joinScreen').style.display = 'flex';
+        }
+
+        function backToMenu() {
+            document.getElementById('joinScreen').style.display = 'none';
+            document.getElementById('waitingScreen').style.display = 'none';
+            document.getElementById('menuScreen').style.display = 'flex';
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+            }
+        }
+
+        function cancelWaiting() {
+            backToMenu();
+            if (socket) {
+                socket.emit('cancelRoom');
+            }
+        }
+
+        function joinGame() {
+            const code = document.getElementById('joinCodeInput').value.trim().toUpperCase();
+            if (code.length !== 6) {
+                alert('Por favor, ingresa un código válido de 6 caracteres.');
+                return;
+            }
+            document.getElementById('joinScreen').style.display = 'none';
+            document.getElementById('gameContainer').style.display = 'flex';
+            startOnlineGame(code);
+        }
+
+        function startOnlineGame(roomCode = null) {
+            isOnline = true;
+            socket = io('http://localhost:3000', {
+                path: '/socket.io',
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000
+            });
+            socket.on('connect', () => {
+                console.log('Conectado al servidor:', socket.id);
+                if (roomCode) {
+                    socket.emit('joinRoom', { roomCode });
+                } else {
+                    socket.emit('createRoom');
+                }
+            });
+            socket.on('roomCreated', (data) => {
+                console.log('Código recibido:', data.roomCode);
+                document.getElementById('roomCode').textContent = data.roomCode;
+            });
+            socket.on('assignPlayer', (data) => {
+                playerId = data.playerId;
+                addNotification(`¡Eres el Jugador ${playerId + 1}!`, BASE_WIDTH / 2 - 50, 50);
+                if (data.players) players = data.players;
+                if (data.gameState) {
+                    teamScore = data.gameState.teamScore;
+                    level = data.gameState.level;
+                    teamIngredients = data.gameState.teamIngredients;
+                    ingredientOrder = data.gameState.ingredientOrder;
+                    isCooking = data.gameState.isCooking;
+                    cookingStartTime = data.gameState.cookingStartTime;
+                    tables = data.gameState.tables;
+                }
+                document.getElementById('waitingScreen').style.display = 'none';
+                document.getElementById('gameContainer').style.display = 'flex';
+                if (canvas.requestFullscreen) {
+                    canvas.requestFullscreen();
+                }
+            });
+            socket.on('updatePosition', (data) => {
+                if (data.playerId !== playerId) {
+                    players[data.playerId].x = data.x;
+                    players[data.playerId].y = data.y;
+                }
+            });
+            socket.on('ingredientPicked', (data) => {
+                teamIngredients = data.teamIngredients;
+                ingredientOrder = data.ingredientOrder;
+                addNotification(`Ingrediente: ${data.ingredient}`, bodega.x, bodega.y - 20);
+            });
+            socket.on('startCooking', (data) => {
+                isCooking = true;
+                cookingStartTime = data.startTime;
+                addNotification('¡Cocinando!', cookingStation.x, cookingStation.y - 30);
+            });
+            socket.on('pizzaCompleted', (data) => {
+                players[data.playerIndex].carryingPizza = true;
+                players[data.playerIndex].pizzaOrder = data.pizzaOrder;
+                teamIngredients = [];
+                ingredientOrder = [];
+                isCooking = false;
+                cookingStartTime = null;
+                addNotification(`J${data.playerIndex + 1}: Pizza lista`, players[data.playerIndex].x, players[data.playerIndex].y - 20);
+            });
+            socket.on('pizzaDiscarded', (data) => {
+                players[data.playerIndex].carryingPizza = false;
+                players[data.playerIndex].pizzaOrder = null;
+                addNotification(`J${data.playerIndex + 1}: Pizza descartada`, players[data.playerIndex].x, players[data.playerIndex].y - 20);
+            });
+            socket.on('pizzaDelivered', (data) => {
+                tables[data.tableIndex].hasCustomer = false;
+                teamScore = data.score;
+                if (data.correct) {
+                    addNotification('¡Entregada! +10', tables[data.tableIndex].x + 20, tables[data.tableIndex].y + 120);
+                    checkLevelUp();
+                } else {
+                    addNotification('¡Pizza incorrecta! -5', tables[data.tableIndex].x + 20, tables[data.tableIndex].y + 120);
+                }
+                checkWin();
+            });
+            socket.on('newCustomer', (data) => {
+                tables[data.tableIndex].hasCustomer = true;
+                tables[data.tableIndex].customerTimer = data.customerTimer;
+                tables[data.tableIndex].order = data.order;
+            });
+            socket.on('levelUp', (data) => {
+                level = data.level;
+                if (data.newTable) {
+                    tables.push(data.newTable);
+                }
+                addNotification(`¡Nivel ${level} alcanzado!`, BASE_WIDTH / 2 - 50, 20);
+            });
+            socket.on('gameWon', (data) => {
+                gameWon = true;
+                document.getElementById('gameContainer').style.display = 'none';
+                document.getElementById('winScreen').style.display = 'flex';
+                document.getElementById('winMessage').textContent = `¡Ganaste! Puntuación final: ${data.score}`;
+            });
+            socket.on('resetGame', () => {
+                resetGame();
+            });
+            socket.on('roomFull', () => {
+                addNotification('¡La sala está llena! Intenta de nuevo.', BASE_WIDTH / 2 - 50, 50);
+                backToMenu();
+            });
+            socket.on('invalidCode', () => {
+                alert('Código inválido. Por favor, verifica e intenta de nuevo.');
+                backToMenu();
+            });
+            socket.on('connect_error', (error) => {
+                console.error('Error de conexión:', error.message);
+                alert('No se pudo conectar al servidor. Intenta de nuevo.');
+                backToMenu();
+            });
+            window.addEventListener('resize', resizeCanvas);
+            setupCanvas();
+            update();
+        }
+
+        setupCanvas();
+    </script>
+</body>
+</html>
